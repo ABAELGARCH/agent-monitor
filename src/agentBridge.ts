@@ -13,6 +13,16 @@ let nextAgentId = 1;
 const sessionToAgent = new Map<string, number>();
 const agentToSession = new Map<number, string>();
 
+// Seat assignment by team role → chair UID in the department layout
+const ROLE_TO_SEAT: Record<string, string> = {
+  'team-lead':        'dept-2',   // Boss office (center top)
+  'backend-engineer': 'dept-9',   // Backend office (left)
+  'frontend-engineer':'dept-15',  // Frontend office (center)
+  'quality-assurance':'dept-20',  // QA office (right)
+  'devops-engineer':  'dept-25',  // DevOps office (bottom left)
+  'research-analyst': 'dept-30',  // Research office (bottom center)
+};
+
 // Team state
 interface TeamMember {
   name: string;
@@ -99,10 +109,12 @@ function handleMessage(data: Record<string, unknown>): void {
 
           // Use team member name as folderName for the label
           const label = session.teamMemberName || session.name;
+          const seatId = session.teamRole ? ROLE_TO_SEAT[session.teamRole] : undefined;
           dispatch({
             type: 'agentCreated',
             id: agentId,
             folderName: label,
+            seatId,
           });
 
           dispatchSessionMeta(agentId, session);
@@ -130,10 +142,12 @@ function handleMessage(data: Record<string, unknown>): void {
         agentToSession.set(agentId, sid);
 
         const label = session.teamMemberName || session.name;
+        const seatId = session.teamRole ? ROLE_TO_SEAT[session.teamRole] : undefined;
         dispatch({
           type: 'agentCreated',
           id: agentId,
           folderName: label,
+          seatId,
         });
 
         dispatchSessionMeta(agentId, session);
