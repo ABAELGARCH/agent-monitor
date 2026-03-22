@@ -1,14 +1,19 @@
 #!/bin/bash
 # ── Agent Monitor Hook Scripts ─────────────────────────────────
-# These are called by Claude Code hooks to send events to the monitor server.
-# Usage: hooks.sh <event_type> [args...]
+# Called by Claude Code hooks. Data arrives via stdin as JSON.
+# Usage: hooks.sh <event_type>
 
 MONITOR_URL="${AGENT_MONITOR_URL:-http://localhost:4200}"
-SESSION_ID="${CLAUDE_SESSION_ID:-$(echo $PPID)}"
-SESSION_NAME="${CLAUDE_SESSION_NAME:-$(basename "$PWD")}"
+
+# Read JSON from stdin
+INPUT=$(cat)
+
+# Extract common fields
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+SESSION_NAME=$(basename "${CWD:-unknown}")
 
 event_type="$1"
-shift
 
 send() {
   curl -s -X POST "$MONITOR_URL$1" \
@@ -21,20 +26,19 @@ send() {
 
 case "$event_type" in
   session_start)
-    send "/api/session" "{\"sessionId\":\"$SESSION_ID\",\"name\":\"$SESSION_NAME\",\"cwd\":\"$PWD\"}"
+    send "/api/session" "{\"sessionId\":\"$SESSION_ID\",\"name\":\"$SESSION_NAME\",\"cwd\":\"$CWD\"}"
     ;;
   tool_start)
-    TOOL_NAME="$1"
+    TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
     send "/api/tool/start" "{\"sessionId\":\"$SESSION_ID\",\"tool\":\"$TOOL_NAME\"}"
     ;;
   tool_end)
-    TOOL_NAME="$1"
+    TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
     send "/api/tool/end" "{\"sessionId\":\"$SESSION_ID\",\"tool\":\"$TOOL_NAME\"}"
-    ;;
-  waiting)
-    send "/api/waiting" "{\"sessionId\":\"$SESSION_ID\"}"
     ;;
   session_end)
     send "/api/session/end" "{\"sessionId\":\"$SESSION_ID\"}"
     ;;
 esac
+
+exit 0
