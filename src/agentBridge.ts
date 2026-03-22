@@ -6,6 +6,8 @@
  * Now also handles Agent Teams: boss/lead, departments, task board.
  */
 
+import { setAgentMeta } from './agentMetaStore.js';
+
 let ws: WebSocket | null = null;
 let nextAgentId = 1;
 const sessionToAgent = new Map<string, number>();
@@ -237,28 +239,11 @@ export function connectAgentBridge(): void {
   connect();
 }
 
-// Expose getters for React components
-export function getTeams(): TeamData[] {
-  return currentTeams;
-}
-
-export function getTasks(): Record<string, TaskInfo[]> {
-  return currentTasks;
-}
-
-export function getAgentMeta(): Map<number, { sessionId: string; isLead: boolean; teamRole: string; teamName: string; memberName: string }> {
-  // This will be populated by session-meta events
-  return agentMetaMap;
-}
-
-// Agent metadata populated via custom events
-const agentMetaMap = new Map<number, { sessionId: string; isLead: boolean; teamRole: string; teamName: string; memberName: string }>();
-
-// Listen for our own meta events to populate the map
+// Listen for session-meta events → populate shared store
 if (typeof window !== 'undefined') {
   window.addEventListener('agent-monitor:session-meta', ((e: CustomEvent) => {
     const d = e.detail;
-    agentMetaMap.set(d.agentId, {
+    setAgentMeta(d.agentId, {
       sessionId: d.sessionId,
       isLead: d.isLead || false,
       teamRole: d.teamRole || '',

@@ -515,6 +515,87 @@ export function renderBubbles(
   }
 }
 
+// ── Progress bars above working agents ──────────────────────────
+
+const PROGRESS_BAR_W = 20; // pixels (world space)
+const PROGRESS_BAR_H = 3;
+const PROGRESS_BAR_OFFSET_Y = 28; // pixels above character anchor
+
+const ROLE_BAR_COLORS: Record<string, string> = {
+  'team-lead': '#f59e0b',
+  'backend-engineer': '#6366f1',
+  'frontend-engineer': '#22c55e',
+  'quality-assurance': '#ec4899',
+  'devops-engineer': '#f97316',
+  'research-analyst': '#a855f7',
+};
+
+export function renderProgressBars(
+  ctx: CanvasRenderingContext2D,
+  characters: Character[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  agentMeta: Map<number, { isLead: boolean; teamRole: string; memberName: string }>,
+): void {
+  const now = Date.now();
+
+  for (const ch of characters) {
+    if (!ch.isActive) continue;
+
+    const sittingOff = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
+    const barW = PROGRESS_BAR_W * zoom;
+    const barH = Math.max(PROGRESS_BAR_H * zoom, 2);
+    const barX = Math.round(offsetX + ch.x * zoom - barW / 2);
+    const barY = Math.round(
+      offsetY + (ch.y + sittingOff - PROGRESS_BAR_OFFSET_Y) * zoom,
+    );
+
+    // Determine bar color from team role
+    const meta = agentMeta.get(ch.id);
+    const barColor = meta ? (ROLE_BAR_COLORS[meta.teamRole] || '#6366f1') : '#6366f1';
+
+    // Animated fill: pulse between 30% and 90% when active
+    const pulse = 0.3 + 0.3 * (1 + Math.sin(now / 600 + ch.id * 1.7));
+
+    // Background (dark)
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(barX - zoom, barY, barW + 2 * zoom, barH + 2 * zoom);
+
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX - zoom, barY, barW + 2 * zoom, barH + 2 * zoom);
+
+    // Fill
+    ctx.fillStyle = barColor;
+    ctx.fillRect(barX, barY + zoom, Math.round(barW * pulse), barH);
+
+    // Glow effect
+    ctx.shadowColor = barColor;
+    ctx.shadowBlur = 4 * zoom;
+    ctx.fillRect(barX, barY + zoom, Math.round(barW * pulse), barH);
+    ctx.shadowBlur = 0;
+
+    // Department label above bar (for team members)
+    if (meta && meta.memberName) {
+      const label = meta.isLead ? `\u2654 ${meta.memberName}` : meta.memberName;
+      const fontSize = Math.max(Math.round(5 * zoom), 6);
+      ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
+      ctx.textAlign = 'center';
+
+      // Text shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.fillText(label, barX + barW / 2 + 1, barY - 2 * zoom + 1);
+
+      // Text
+      ctx.fillStyle = meta.isLead ? '#f59e0b' : barColor;
+      ctx.fillText(label, barX + barW / 2, barY - 2 * zoom);
+      ctx.textAlign = 'start';
+    }
+  }
+}
+
 export interface ButtonBounds {
   /** Center X in device pixels */
   cx: number;
@@ -575,6 +656,7 @@ export function renderFrame(
   tileColors?: Array<FloorColor | null>,
   layoutCols?: number,
   layoutRows?: number,
+  agentMeta?: Map<number, { isLead: boolean; teamRole: string; memberName: string }>,
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -617,6 +699,11 @@ export function renderFrame(
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom);
+
+  // Progress bars + department labels above working agents
+  if (agentMeta && agentMeta.size > 0) {
+    renderProgressBars(ctx, characters, offsetX, offsetY, zoom, agentMeta);
+  }
 
   // Editor overlays
   if (editor) {

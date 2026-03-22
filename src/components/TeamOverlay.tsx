@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getAgentMetaMap } from '../agentMetaStore.js';
+
 interface TeamMember {
   name: string;
   role: string;
@@ -95,7 +97,18 @@ export function TeamOverlay(): JSX.Element | null {
 
   const team = teams[0]; // Primary team
   const allTasks = Object.values(tasks).flat();
-  const activeMetas = agentMetas.filter((m) => m.teamName);
+  // Also check shared store for latest meta
+  const storeEntries = Array.from(getAgentMetaMap().values());
+  const activeMetas = agentMetas.length > 0
+    ? agentMetas.filter((m) => m.teamName)
+    : storeEntries.filter((m) => m.teamName).map((m) => ({
+        agentId: 0,
+        sessionId: m.sessionId,
+        isLead: m.isLead,
+        teamRole: m.teamRole,
+        teamName: m.teamName,
+        memberName: m.memberName,
+      }));
 
   return (
     <>

@@ -21,6 +21,7 @@ import type {
   SelectionRenderState,
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
+import { getAgentMetaMap } from '../../agentMetaStore.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 
@@ -267,6 +268,7 @@ export function OfficeCanvas({
           officeState.getLayout().tileColors,
           officeState.getLayout().cols,
           officeState.getLayout().rows,
+          getAgentMetaMap(),
         );
         offsetRef.current = { x: offsetX, y: offsetY };
 
