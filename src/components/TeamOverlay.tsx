@@ -1,6 +1,10 @@
 /**
  * TeamOverlay — Renders team hierarchy, boss badge, department labels,
  * and a task board on top of the pixel art office.
+ *
+ * IMPORTANT: All container divs use pointerEvents:'none' so scroll/wheel
+ * events pass through to the canvas for zoom. Only interactive elements
+ * (buttons, scrollable lists) use pointerEvents:'auto'.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -95,9 +99,8 @@ export function TeamOverlay(): JSX.Element | null {
 
   if (teams.length === 0) return null;
 
-  const team = teams[0]; // Primary team
+  const team = teams[0];
   const allTasks = Object.values(tasks).flat();
-  // Also check shared store for latest meta
   const storeEntries = Array.from(getAgentMetaMap().values());
   const activeMetas = agentMetas.length > 0
     ? agentMetas.filter((m) => m.teamName)
@@ -112,7 +115,7 @@ export function TeamOverlay(): JSX.Element | null {
 
   return (
     <>
-      {/* Team header bar */}
+      {/* Team header bar — pointerEvents:none except buttons */}
       <div
         style={{
           position: 'absolute',
@@ -125,7 +128,7 @@ export function TeamOverlay(): JSX.Element | null {
           pointerEvents: 'none',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, pointerEvents: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ fontSize: 18 }}>{'\u2654'}</span>
           <span
             style={{
@@ -145,18 +148,19 @@ export function TeamOverlay(): JSX.Element | null {
             onClick={toggleTaskBoard}
             style={{
               ...btnStyle,
+              pointerEvents: 'auto',
               background: showTaskBoard ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.05)',
             }}
           >
             Tasks
           </button>
-          <button onClick={toggleCollapsed} style={btnStyle}>
+          <button onClick={toggleCollapsed} style={{ ...btnStyle, pointerEvents: 'auto' }}>
             {collapsed ? 'Show' : 'Hide'}
           </button>
         </div>
       </div>
 
-      {/* Department roster — left side */}
+      {/* Department roster — left side, pointerEvents:none so wheel passes through */}
       {!collapsed && (
         <div
           style={{
@@ -168,15 +172,13 @@ export function TeamOverlay(): JSX.Element | null {
             flexDirection: 'column',
             gap: 4,
             maxHeight: 'calc(100vh - 120px)',
-            overflowY: 'auto',
-            pointerEvents: 'auto',
+            pointerEvents: 'none',
           }}
         >
           {team.members.map((member) => {
             const color = ROLE_COLORS[member.role] || ROLE_COLORS.default;
             const icon = ROLE_ICONS[member.role] || '\u{1F916}';
             const isOnline = activeMetas.some((m) => m.memberName === member.name);
-            const meta = activeMetas.find((m) => m.memberName === member.name);
 
             return (
               <div
@@ -231,18 +233,10 @@ export function TeamOverlay(): JSX.Element | null {
                     />
                   )}
                 </div>
-                <div
-                  style={{
-                    fontSize: 9,
-                    color: '#6a6a8a',
-                    marginTop: 2,
-                  }}
-                >
+                <div style={{ fontSize: 9, color: '#6a6a8a', marginTop: 2 }}>
                   {member.role.replace(/-/g, ' ')}
                   {member.model && (
-                    <span style={{ marginLeft: 6, color: '#444' }}>
-                      ({member.model})
-                    </span>
+                    <span style={{ marginLeft: 6, color: '#444' }}>({member.model})</span>
                   )}
                 </div>
               </div>
@@ -251,7 +245,7 @@ export function TeamOverlay(): JSX.Element | null {
         </div>
       )}
 
-      {/* Task board — right side */}
+      {/* Task board — right side, pointerEvents:none so wheel passes through */}
       {!collapsed && showTaskBoard && allTasks.length > 0 && (
         <div
           style={{
@@ -266,7 +260,7 @@ export function TeamOverlay(): JSX.Element | null {
             maxWidth: 280,
             maxHeight: 'calc(100vh - 120px)',
             overflowY: 'auto',
-            pointerEvents: 'auto',
+            pointerEvents: 'none',
           }}
         >
           <div
@@ -331,14 +325,7 @@ export function TeamOverlay(): JSX.Element | null {
                 </div>
               )}
               {task.owner && (
-                <div
-                  style={{
-                    fontSize: 8,
-                    color: '#6a6a8a',
-                    marginTop: 2,
-                    marginLeft: 12,
-                  }}
-                >
+                <div style={{ fontSize: 8, color: '#6a6a8a', marginTop: 2, marginLeft: 12 }}>
                   {'\u2192'} {task.owner}
                 </div>
               )}
@@ -359,5 +346,4 @@ const btnStyle: React.CSSProperties = {
   borderRadius: 3,
   padding: '4px 10px',
   cursor: 'pointer',
-  pointerEvents: 'auto',
 };
