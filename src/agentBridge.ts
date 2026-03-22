@@ -92,6 +92,26 @@ function dispatch(data: unknown): void {
   window.dispatchEvent(new MessageEvent('message', { data }));
 }
 
+// ── Layout switching ────────────────────────────────────────────
+let currentLayoutMode: 'small' | 'departments' = 'small';
+
+function getLayouts(): { small: unknown; departments: unknown } | null {
+  return (window as Record<string, unknown>).__agentMonitorLayouts as { small: unknown; departments: unknown } | null;
+}
+
+function switchLayout(mode: 'small' | 'departments'): void {
+  if (mode === currentLayoutMode) return;
+  const layouts = getLayouts();
+  if (!layouts) return;
+
+  const layout = mode === 'departments' ? layouts.departments : layouts.small;
+  if (!layout) return;
+
+  currentLayoutMode = mode;
+  dispatch({ type: 'layoutLoaded', layout });
+  console.log(`[AgentBridge] Switched to ${mode} layout`);
+}
+
 function handleMessage(data: Record<string, unknown>): void {
   switch (data.type) {
     case 'init': {
@@ -100,6 +120,14 @@ function handleMessage(data: Record<string, unknown>): void {
       const tasks = (data.tasks || {}) as Record<string, TaskInfo[]>;
 
       dispatchTeamEvent(teams, tasks);
+
+      // Switch layout based on whether teams exist
+      const hasTeamMembers = sessionsArr.some((s) => s.teamRole);
+      if (hasTeamMembers || teams.length > 0) {
+        switchLayout('departments');
+      } else {
+        switchLayout('small');
+      }
 
       for (const session of sessionsArr) {
         if (!sessionToAgent.has(session.id)) {
@@ -135,6 +163,12 @@ function handleMessage(data: Record<string, unknown>): void {
     case 'session_start': {
       const session = data.session as SessionData | undefined;
       if (!session) break;
+
+      // If this session belongs to a team, switch to department layout
+      if (session.teamRole) {
+        switchLayout('departments');
+      }
+
       const sid = session.id;
       if (!sessionToAgent.has(sid)) {
         const agentId = nextAgentId++;
@@ -228,6 +262,10 @@ function handleMessage(data: Record<string, unknown>): void {
       const teams = (data.teams || []) as TeamData[];
       const tasks = (data.tasks || currentTasks) as Record<string, TaskInfo[]>;
       dispatchTeamEvent(teams, tasks);
+      // Switch to department layout when a team appears
+      if (teams.length > 0) {
+        switchLayout('departments');
+      }
       break;
     }
 

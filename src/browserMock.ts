@@ -225,9 +225,14 @@ export async function initBrowserMock(): Promise<void> {
         decodeFurnitureFromPng(base, catalog),
       ]);
 
-  const layout = assetIndex.defaultLayout
-    ? await fetch(`${base}assets/${assetIndex.defaultLayout}`).then((r) => r.json())
-    : null;
+  // Load BOTH layouts: small office (layout 1) and department office (layout 2)
+  const [layoutSmall, layoutDepartments] = await Promise.all([
+    fetch(`${base}assets/default-layout-1.json`).then((r) => r.json()).catch(() => null),
+    fetch(`${base}assets/default-layout-2.json`).then((r) => r.json()).catch(() => null),
+  ]);
+
+  // Default to small office — bridge will switch to departments if teams exist
+  const layout = layoutSmall;
 
   mockPayload = {
     characters,
@@ -236,6 +241,12 @@ export async function initBrowserMock(): Promise<void> {
     furnitureCatalog: catalog,
     furnitureSprites,
     layout,
+  };
+
+  // Store both layouts for dynamic switching
+  (window as Record<string, unknown>).__agentMonitorLayouts = {
+    small: layoutSmall,
+    departments: layoutDepartments,
   };
 
   console.log(
