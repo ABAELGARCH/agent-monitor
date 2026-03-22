@@ -9,6 +9,8 @@ export interface AgentMetaEntry {
   teamRole: string;
   teamName: string;
   memberName: string;
+  progress: number; // 0.0 to 1.0 — real progress based on tool completions
+  isFinished: boolean; // true when agent has completed their work
 }
 
 const metaMap = new Map<number, AgentMetaEntry>();
@@ -27,4 +29,19 @@ export function getAgentMeta(agentId: number): AgentMetaEntry | undefined {
 
 export function removeAgentMeta(agentId: number): void {
   metaMap.delete(agentId);
+}
+
+export function updateAgentProgress(agentId: number, progress: number): void {
+  const entry = metaMap.get(agentId);
+  if (entry) {
+    entry.progress = progress;
+  }
+}
+
+export function markAgentFinished(agentId: number): void {
+  const entry = metaMap.get(agentId);
+  if (entry) {
+    entry.progress = 1.0;
+    entry.isFinished = true;
+  }
 }

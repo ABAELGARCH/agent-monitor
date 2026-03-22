@@ -51,6 +51,8 @@ interface AgentSession {
   lastActivity: number;
   character: string;
   toolCount: number;
+  progress: number; // 0.0 to 1.0
+  isFinished: boolean;
   teamName?: string;
   teamRole?: string;
   teamMemberName?: string;
@@ -327,29 +329,24 @@ function agentMonitorPlugin(): Plugin {
         });
       }
 
-      // Hook API endpoints
-      server.middlewares.use('/api/session', async (req, res, next) => {
+      // Hook API endpoints — IMPORTANT: more specific paths BEFORE less specific
+      // (/api/session/done and /api/session/end BEFORE /api/session)
+
+      // Agent finished working (Stop hook) — progress 100%, go to salon
+      server.middlewares.use('/api/session/done', async (req, res, next) => {
         if (req.method === 'POST') {
           const body = await parseBody(req);
-          const sessionId = (body.sessionId as string) || crypto.randomUUID();
-          const name = (body.name as string) || path.basename((body.cwd as string) || 'Claude');
-          if (!sessions.has(sessionId)) {
-            sessions.set(sessionId, {
-              id: sessionId,
-              name,
-              cwd: (body.cwd as string) || '',
-              status: 'idle',
-              currentTool: null,
-              tools: [],
-              startedAt: Date.now(),
-              lastActivity: Date.now(),
-              character: assignCharacter(),
-              toolCount: 0,
-            });
+          const sessionId = body.sessionId as string;
+          const session = sessions.get(sessionId);
+          if (session) {
+            session.progress = 1.0;
+            session.isFinished = true;
+            session.status = 'idle';
+            session.currentTool = null;
+            session.lastActivity = Date.now();
+            broadcast({ type: 'agent_done', sessionId, progress: 1.0 });
           }
-          matchSessionToTeam(sessions.get(sessionId)!);
-          broadcast({ type: 'session_start', session: sessions.get(sessionId) });
-          jsonResponse(res, { ok: true, id: sessionId });
+          jsonResponse(res, { ok: true });
         } else { next(); }
       });
 
@@ -371,6 +368,34 @@ function agentMonitorPlugin(): Plugin {
         } else { next(); }
       });
 
+      // Create session (must be AFTER /done and /end to avoid prefix match)
+      server.middlewares.use('/api/session', async (req, res, next) => {
+        if (req.method === 'POST') {
+          const body = await parseBody(req);
+          const sessionId = (body.sessionId as string) || crypto.randomUUID();
+          const name = (body.name as string) || path.basename((body.cwd as string) || 'Claude');
+          if (!sessions.has(sessionId)) {
+            sessions.set(sessionId, {
+              id: sessionId,
+              name,
+              cwd: (body.cwd as string) || '',
+              status: 'idle',
+              currentTool: null,
+              tools: [],
+              startedAt: Date.now(),
+              lastActivity: Date.now(),
+              character: assignCharacter(),
+              toolCount: 0,
+              progress: 0,
+              isFinished: false,
+            });
+          }
+          matchSessionToTeam(sessions.get(sessionId)!);
+          broadcast({ type: 'session_start', session: sessions.get(sessionId) });
+          jsonResponse(res, { ok: true, id: sessionId });
+        } else { next(); }
+      });
+
       server.middlewares.use('/api/tool/start', async (req, res, next) => {
         if (req.method === 'POST') {
           const body = await parseBody(req);
@@ -383,6 +408,10 @@ function agentMonitorPlugin(): Plugin {
             session.currentTool = tool;
             session.lastActivity = Date.now();
             session.toolCount++;
+            // Progress: logarithmic curve approaching 1.0
+            // Each tool adds less — asymptotic: 1 - 1/(1 + count * 0.12)
+            session.progress = Math.min(0.95, 1 - 1 / (1 + session.toolCount * 0.12));
+            session.isFinished = false;
             session.tools.push({
               name: tool,
               category: toolCategory,
@@ -390,7 +419,7 @@ function agentMonitorPlugin(): Plugin {
               input: '',
             });
             if (session.tools.length > 50) session.tools.shift();
-            broadcast({ type: 'tool_start', sessionId, tool, category: toolCategory });
+            broadcast({ type: 'tool_start', sessionId, tool, category: toolCategory, progress: session.progress });
           }
           jsonResponse(res, { ok: true });
         } else { next(); }
@@ -406,7 +435,7 @@ function agentMonitorPlugin(): Plugin {
             session.status = 'idle';
             session.currentTool = null;
             session.lastActivity = Date.now();
-            broadcast({ type: 'tool_end', sessionId, tool });
+            broadcast({ type: 'tool_end', sessionId, tool, progress: session.progress });
           }
           jsonResponse(res, { ok: true });
         } else { next(); }

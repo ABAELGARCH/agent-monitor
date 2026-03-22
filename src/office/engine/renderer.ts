@@ -536,12 +536,14 @@ export function renderProgressBars(
   offsetX: number,
   offsetY: number,
   zoom: number,
-  agentMeta: Map<number, { isLead: boolean; teamRole: string; memberName: string }>,
+  agentMeta: Map<number, { isLead: boolean; teamRole: string; memberName: string; progress: number; isFinished: boolean }>,
 ): void {
-  const now = Date.now();
-
   for (const ch of characters) {
-    if (!ch.isActive) continue;
+    const meta = agentMeta.get(ch.id);
+
+    // Show bar for active agents OR finished agents (full bar)
+    const isFinished = meta?.isFinished ?? false;
+    if (!ch.isActive && !isFinished) continue;
 
     const sittingOff = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
     const barW = PROGRESS_BAR_W * zoom;
@@ -552,34 +554,51 @@ export function renderProgressBars(
     );
 
     // Determine bar color from team role
-    const meta = agentMeta.get(ch.id);
     const barColor = meta ? (ROLE_BAR_COLORS[meta.teamRole] || '#6366f1') : '#6366f1';
 
-    // Animated fill: pulse between 30% and 90% when active
-    const pulse = 0.3 + 0.3 * (1 + Math.sin(now / 600 + ch.id * 1.7));
+    // Real progress from server (0.0 → 1.0), fills up as tools complete
+    const progress = meta?.progress ?? (ch.isActive ? 0.05 : 0);
+    const fillColor = isFinished ? '#22c55e' : barColor;
 
     // Background (dark)
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(barX - zoom, barY, barW + 2 * zoom, barH + 2 * zoom);
 
     // Border
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.strokeStyle = isFinished ? 'rgba(34,197,94,0.4)' : 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     ctx.strokeRect(barX - zoom, barY, barW + 2 * zoom, barH + 2 * zoom);
 
-    // Fill
-    ctx.fillStyle = barColor;
-    ctx.fillRect(barX, barY + zoom, Math.round(barW * pulse), barH);
+    // Fill bar based on real progress
+    const fillW = Math.round(barW * Math.max(progress, 0.02));
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(barX, barY + zoom, fillW, barH);
 
-    // Glow effect
-    ctx.shadowColor = barColor;
-    ctx.shadowBlur = 4 * zoom;
-    ctx.fillRect(barX, barY + zoom, Math.round(barW * pulse), barH);
-    ctx.shadowBlur = 0;
+    // Subtle glow on the fill tip when active (not pulsing the whole bar)
+    if (ch.isActive && !isFinished) {
+      ctx.save();
+      ctx.shadowColor = barColor;
+      ctx.shadowBlur = 3 * zoom;
+      ctx.fillStyle = barColor;
+      // Small bright dot at the end of the fill
+      ctx.fillRect(barX + fillW - zoom, barY + zoom, zoom, barH);
+      ctx.restore();
+    }
 
-    // Department label above bar (for team members)
+    // "DONE" checkmark for finished agents
+    if (isFinished) {
+      ctx.save();
+      ctx.shadowColor = '#22c55e';
+      ctx.shadowBlur = 6 * zoom;
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(barX, barY + zoom, barW, barH);
+      ctx.restore();
+    }
+
+    // Department label above bar
     if (meta && meta.memberName) {
-      const label = meta.isLead ? `\u2654 ${meta.memberName}` : meta.memberName;
+      const suffix = isFinished ? ' \u2714' : '';
+      const label = meta.isLead ? `\u2654 ${meta.memberName}${suffix}` : `${meta.memberName}${suffix}`;
       const fontSize = Math.max(Math.round(5 * zoom), 6);
       ctx.font = `bold ${fontSize}px "Press Start 2P", monospace`;
       ctx.textAlign = 'center';
@@ -589,7 +608,7 @@ export function renderProgressBars(
       ctx.fillText(label, barX + barW / 2 + 1, barY - 2 * zoom + 1);
 
       // Text
-      ctx.fillStyle = meta.isLead ? '#f59e0b' : barColor;
+      ctx.fillStyle = isFinished ? '#22c55e' : (meta.isLead ? '#f59e0b' : barColor);
       ctx.fillText(label, barX + barW / 2, barY - 2 * zoom);
       ctx.textAlign = 'start';
     }

@@ -6,7 +6,7 @@
  * Now also handles Agent Teams: boss/lead, departments, task board.
  */
 
-import { setAgentMeta } from './agentMetaStore.js';
+import { markAgentFinished, setAgentMeta, updateAgentProgress } from './agentMetaStore.js';
 
 let ws: WebSocket | null = null;
 let nextAgentId = 1;
@@ -164,6 +164,9 @@ function handleMessage(data: Record<string, unknown>): void {
           toolId: `tool-${Date.now()}-${agentId}`,
           status: data.tool as string,
         });
+        if (typeof data.progress === 'number') {
+          updateAgentProgress(agentId, data.progress as number);
+        }
       }
       break;
     }
@@ -173,6 +176,22 @@ function handleMessage(data: Record<string, unknown>): void {
       if (agentId != null) {
         dispatch({ type: 'agentToolsClear', id: agentId });
         dispatch({ type: 'agentStatus', id: agentId, status: 'active' });
+        if (typeof data.progress === 'number') {
+          updateAgentProgress(agentId, data.progress as number);
+        }
+      }
+      break;
+    }
+
+    case 'agent_done': {
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
+      if (agentId != null) {
+        markAgentFinished(agentId);
+        // Clear tools → agent becomes idle
+        dispatch({ type: 'agentToolsClear', id: agentId });
+        dispatch({ type: 'agentStatus', id: agentId, status: 'active' });
+        // Release seat → character will wander to common area
+        dispatch({ type: 'agentSeatRelease', id: agentId });
       }
       break;
     }
@@ -263,6 +282,8 @@ if (typeof window !== 'undefined') {
       teamRole: d.teamRole || '',
       teamName: d.teamName || '',
       memberName: d.teamMemberName || d.name || '',
+      progress: 0,
+      isFinished: false,
     });
   }) as EventListener);
 }

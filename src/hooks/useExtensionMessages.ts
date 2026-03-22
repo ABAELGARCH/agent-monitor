@@ -247,6 +247,16 @@ export function useExtensionMessages(
         setSubagentCharacters((prev) => prev.filter((s) => s.parentAgentId !== id));
         os.setAgentTool(id, null);
         os.clearPermissionBubble(id);
+      } else if (msg.type === 'agentSeatRelease') {
+        // Agent finished work — release seat so they wander to common area
+        const id = msg.id as number;
+        const ch = os.characters.get(id);
+        if (ch && ch.seatId) {
+          const seat = os.seats.get(ch.seatId);
+          if (seat) seat.assigned = false;
+          ch.seatId = null;
+          ch.isActive = false;
+        }
       } else if (msg.type === 'agentSelected') {
         const id = msg.id as number;
         setSelectedAgent(id);
