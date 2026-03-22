@@ -248,14 +248,37 @@ export function useExtensionMessages(
         os.setAgentTool(id, null);
         os.clearPermissionBubble(id);
       } else if (msg.type === 'agentSeatRelease') {
-        // Agent finished work — release seat so they wander to common area
+        // Agent finished work — release desk seat, move to a salon seat
         const id = msg.id as number;
         const ch = os.characters.get(id);
         if (ch && ch.seatId) {
-          const seat = os.seats.get(ch.seatId);
-          if (seat) seat.assigned = false;
-          ch.seatId = null;
-          ch.isActive = false;
+          // Release current desk seat
+          const oldSeat = os.seats.get(ch.seatId);
+          if (oldSeat) oldSeat.assigned = false;
+
+          // Find a free salon seat (UIDs starting with "salon-")
+          let salonSeatId: string | null = null;
+          for (const [seatId, seat] of os.seats) {
+            if (seatId.startsWith('salon-') && !seat.assigned) {
+              salonSeatId = seatId;
+              break;
+            }
+          }
+
+          if (salonSeatId) {
+            // Assign salon seat — character will pathfind there
+            const salonSeat = os.seats.get(salonSeatId)!;
+            salonSeat.assigned = true;
+            ch.seatId = salonSeatId;
+            ch.isActive = false;
+            // Trigger walk to new seat
+            ch.state = 0; // IDLE → will pick up new seat in next update
+            ch.wanderTimer = 0;
+          } else {
+            // No salon seat free — just wander
+            ch.seatId = null;
+            ch.isActive = false;
+          }
         }
       } else if (msg.type === 'agentSelected') {
         const id = msg.id as number;
