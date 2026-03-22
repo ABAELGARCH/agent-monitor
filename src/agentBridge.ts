@@ -3,8 +3,7 @@
  * agent-monitor server and translates them into the same window.postMessage
  * events that the VS Code extension would send.
  *
- * This replaces the VS Code extension's agent lifecycle management
- * for standalone browser usage.
+ * Now also handles Agent Teams: boss/lead, departments, task board.
  */
 
 let ws: WebSocket | null = null;
@@ -12,61 +11,107 @@ let nextAgentId = 1;
 const sessionToAgent = new Map<string, number>();
 const agentToSession = new Map<number, string>();
 
+// Team state
+interface TeamMember {
+  name: string;
+  role: string;
+  model?: string;
+  responsibilities?: string[];
+}
+
+interface TeamData {
+  teamName: string;
+  description: string;
+  members: TeamMember[];
+}
+
+interface TaskInfo {
+  id: string;
+  subject: string;
+  status: string;
+  owner?: string;
+  activeForm?: string;
+}
+
+interface SessionData {
+  id: string;
+  name: string;
+  character: string;
+  status: string;
+  currentTool: string | null;
+  teamName?: string;
+  teamRole?: string;
+  teamMemberName?: string;
+  isLead?: boolean;
+}
+
+let currentTeams: TeamData[] = [];
+let currentTasks: Record<string, TaskInfo[]> = {};
+
+// Custom event for team/task updates (consumed by TeamOverlay component)
+function dispatchTeamEvent(teams: TeamData[], tasks: Record<string, TaskInfo[]>): void {
+  currentTeams = teams;
+  currentTasks = tasks;
+  window.dispatchEvent(
+    new CustomEvent('agent-monitor:teams', { detail: { teams, tasks } }),
+  );
+}
+
+function dispatchSessionMeta(
+  agentId: number,
+  session: SessionData,
+): void {
+  window.dispatchEvent(
+    new CustomEvent('agent-monitor:session-meta', {
+      detail: {
+        agentId,
+        sessionId: session.id,
+        name: session.name,
+        teamName: session.teamName,
+        teamRole: session.teamRole,
+        teamMemberName: session.teamMemberName,
+        isLead: session.isLead,
+      },
+    }),
+  );
+}
+
 function dispatch(data: unknown): void {
   window.dispatchEvent(new MessageEvent('message', { data }));
 }
 
-/** Map tool name to a status string matching what the extension sends */
-function toolToStatus(tool: string): string {
-  if (!tool) return 'Working...';
-  // Strip mcp__ prefix for readability
-  const clean = tool.replace(/^mcp__\w+__/, '');
-  return clean;
-}
-
-function handleMessage(data: {
-  type: string;
-  sessionId?: string;
-  session?: {
-    id: string;
-    name: string;
-    character: string;
-    status: string;
-    currentTool: string | null;
-  };
-  tool?: string;
-  category?: string;
-  sessions?: Array<{
-    id: string;
-    name: string;
-    character: string;
-    status: string;
-    currentTool: string | null;
-  }>;
-}): void {
+function handleMessage(data: Record<string, unknown>): void {
   switch (data.type) {
     case 'init': {
-      // Server sends all existing sessions on connect
-      if (data.sessions) {
-        for (const session of data.sessions) {
-          if (!sessionToAgent.has(session.id)) {
-            const agentId = nextAgentId++;
-            sessionToAgent.set(session.id, agentId);
-            agentToSession.set(agentId, session.id);
+      const sessionsArr = (data.sessions || []) as SessionData[];
+      const teams = (data.teams || []) as TeamData[];
+      const tasks = (data.tasks || {}) as Record<string, TaskInfo[]>;
+
+      dispatchTeamEvent(teams, tasks);
+
+      for (const session of sessionsArr) {
+        if (!sessionToAgent.has(session.id)) {
+          const agentId = nextAgentId++;
+          sessionToAgent.set(session.id, agentId);
+          agentToSession.set(agentId, session.id);
+
+          // Use team member name as folderName for the label
+          const label = session.teamMemberName || session.name;
+          dispatch({
+            type: 'agentCreated',
+            id: agentId,
+            folderName: label,
+          });
+
+          dispatchSessionMeta(agentId, session);
+
+          if (session.status !== 'idle' && session.status !== 'done') {
             dispatch({
-              type: 'agentCreated',
+              type: 'agentToolStart',
               id: agentId,
-              folderName: session.name,
+              toolId: `tool-${Date.now()}-${agentId}`,
+              status: session.currentTool || session.status,
             });
-            // If agent is currently doing something, set it active
-            if (session.status !== 'idle' && session.status !== 'done') {
-              dispatch({
-                type: 'agentToolStart',
-                id: agentId,
-                toolId: `tool-${Date.now()}-${agentId}`,
-                status: session.currentTool || session.status,
-              });
-            }
           }
         }
       }
@@ -74,38 +119,42 @@ function handleMessage(data: {
     }
 
     case 'session_start': {
-      if (!data.session) break;
-      const sid = data.session.id;
+      const session = data.session as SessionData | undefined;
+      if (!session) break;
+      const sid = session.id;
       if (!sessionToAgent.has(sid)) {
         const agentId = nextAgentId++;
         sessionToAgent.set(sid, agentId);
         agentToSession.set(agentId, sid);
+
+        const label = session.teamMemberName || session.name;
         dispatch({
           type: 'agentCreated',
           id: agentId,
-          folderName: data.session.name,
+          folderName: label,
         });
+
+        dispatchSessionMeta(agentId, session);
       }
       break;
     }
 
     case 'tool_start': {
-      const agentId = sessionToAgent.get(data.sessionId || '');
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
       if (agentId != null && data.tool) {
         dispatch({
           type: 'agentToolStart',
           id: agentId,
           toolId: `tool-${Date.now()}-${agentId}`,
-          status: toolToStatus(data.tool),
+          status: data.tool as string,
         });
       }
       break;
     }
 
     case 'tool_end': {
-      const agentId = sessionToAgent.get(data.sessionId || '');
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
       if (agentId != null) {
-        // Clear tools and set idle
         dispatch({ type: 'agentToolsClear', id: agentId });
         dispatch({ type: 'agentStatus', id: agentId, status: 'active' });
       }
@@ -113,7 +162,7 @@ function handleMessage(data: {
     }
 
     case 'waiting': {
-      const agentId = sessionToAgent.get(data.sessionId || '');
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
       if (agentId != null) {
         dispatch({ type: 'agentStatus', id: agentId, status: 'waiting' });
       }
@@ -121,22 +170,35 @@ function handleMessage(data: {
     }
 
     case 'session_end': {
-      const agentId = sessionToAgent.get(data.sessionId || '');
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
       if (agentId != null) {
         dispatch({ type: 'agentClosed', id: agentId });
-        sessionToAgent.delete(data.sessionId || '');
+        sessionToAgent.delete(data.sessionId as string || '');
         agentToSession.delete(agentId);
       }
       break;
     }
 
     case 'session_removed': {
-      const agentId = sessionToAgent.get(data.sessionId || '');
+      const agentId = sessionToAgent.get(data.sessionId as string || '');
       if (agentId != null) {
         dispatch({ type: 'agentClosed', id: agentId });
-        sessionToAgent.delete(data.sessionId || '');
+        sessionToAgent.delete(data.sessionId as string || '');
         agentToSession.delete(agentId);
       }
+      break;
+    }
+
+    case 'teams_update': {
+      const teams = (data.teams || []) as TeamData[];
+      const tasks = (data.tasks || currentTasks) as Record<string, TaskInfo[]>;
+      dispatchTeamEvent(teams, tasks);
+      break;
+    }
+
+    case 'tasks_update': {
+      const tasks = (data.tasks || {}) as Record<string, TaskInfo[]>;
+      dispatchTeamEvent(currentTeams, tasks);
       break;
     }
   }
@@ -173,4 +235,35 @@ export function connectAgentBridge(): void {
   }
 
   connect();
+}
+
+// Expose getters for React components
+export function getTeams(): TeamData[] {
+  return currentTeams;
+}
+
+export function getTasks(): Record<string, TaskInfo[]> {
+  return currentTasks;
+}
+
+export function getAgentMeta(): Map<number, { sessionId: string; isLead: boolean; teamRole: string; teamName: string; memberName: string }> {
+  // This will be populated by session-meta events
+  return agentMetaMap;
+}
+
+// Agent metadata populated via custom events
+const agentMetaMap = new Map<number, { sessionId: string; isLead: boolean; teamRole: string; teamName: string; memberName: string }>();
+
+// Listen for our own meta events to populate the map
+if (typeof window !== 'undefined') {
+  window.addEventListener('agent-monitor:session-meta', ((e: CustomEvent) => {
+    const d = e.detail;
+    agentMetaMap.set(d.agentId, {
+      sessionId: d.sessionId,
+      isLead: d.isLead || false,
+      teamRole: d.teamRole || '',
+      teamName: d.teamName || '',
+      memberName: d.teamMemberName || d.name || '',
+    });
+  }) as EventListener);
 }

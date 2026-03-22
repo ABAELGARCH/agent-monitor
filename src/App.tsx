@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { DebugView } from './components/DebugView.js';
+import { TeamOverlay } from './components/TeamOverlay.js';
 import { ZoomControls } from './components/ZoomControls.js';
 import { PULSE_ANIMATION_DURATION_SEC } from './constants.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
@@ -266,6 +267,9 @@ function App() {
       />
 
       {!isDebugMode && <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />}
+
+      {/* Team overlay — boss labels, departments, task board */}
+      <TeamOverlay />
 
       {/* Vignette overlay */}
       <div

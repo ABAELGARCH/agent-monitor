@@ -26,6 +26,20 @@ interface DecodedCache {
 
 // ── Agent state (shared between hooks API and WebSocket) ─────────────────────
 
+interface TeamMember {
+  name: string;
+  role: string;
+  model?: string;
+  responsibilities?: string[];
+}
+
+interface TeamConfig {
+  teamName: string;
+  description: string;
+  members: TeamMember[];
+  workflow?: { taskAssignment?: string; approvalRequired?: boolean };
+}
+
 interface AgentSession {
   id: string;
   name: string;
@@ -37,7 +51,23 @@ interface AgentSession {
   lastActivity: number;
   character: string;
   toolCount: number;
+  teamName?: string;
+  teamRole?: string;
+  teamMemberName?: string;
+  isLead?: boolean;
 }
+
+interface TaskInfo {
+  id: string;
+  subject: string;
+  status: string;
+  owner?: string;
+  activeForm?: string;
+}
+
+// ── Team state ───────────────────────────────────────────────────────────────
+const teams = new Map<string, TeamConfig>();
+const tasks = new Map<string, TaskInfo[]>(); // teamName → tasks
 
 const sessions = new Map<string, AgentSession>();
 const CHARACTERS = ['blue', 'green', 'red', 'purple', 'orange', 'pink'];
@@ -66,6 +96,81 @@ function categorizeTool(tool: string): string {
     return 'deploying';
   return 'thinking';
 }
+
+// ── Team & Task scanning ─────────────────────────────────────────────────────
+
+const TEAMS_DIR = path.join(process.env.HOME || '', '.claude', 'teams');
+const TASKS_DIR = path.join(process.env.HOME || '', '.claude', 'tasks');
+
+function scanTeams(): void {
+  if (!fs.existsSync(TEAMS_DIR)) return;
+  for (const dir of fs.readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    const configPath = path.join(TEAMS_DIR, dir.name, 'config.json');
+    if (!fs.existsSync(configPath)) continue;
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as TeamConfig;
+      teams.set(config.teamName, config);
+    } catch { /* skip malformed */ }
+  }
+}
+
+function scanTasks(): void {
+  if (!fs.existsSync(TASKS_DIR)) return;
+  for (const dir of fs.readdirSync(TASKS_DIR, { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    const taskList: TaskInfo[] = [];
+    const taskDir = path.join(TASKS_DIR, dir.name);
+    for (const file of fs.readdirSync(taskDir)) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const task = JSON.parse(fs.readFileSync(path.join(taskDir, file), 'utf-8')) as TaskInfo;
+        taskList.push(task);
+      } catch { /* skip */ }
+    }
+    if (taskList.length > 0) {
+      tasks.set(dir.name, taskList);
+    }
+  }
+}
+
+function matchSessionToTeam(session: AgentSession): void {
+  // Try to match session name to a team member
+  for (const [teamName, config] of teams) {
+    for (const member of config.members) {
+      // Match by member name in session name (e.g., session name contains "backend-dev")
+      if (
+        session.name.toLowerCase().includes(member.name.toLowerCase()) ||
+        session.id.toLowerCase().includes(member.name.toLowerCase())
+      ) {
+        session.teamName = teamName;
+        session.teamRole = member.role;
+        session.teamMemberName = member.name;
+        session.isLead = member.role === 'team-lead';
+        return;
+      }
+    }
+  }
+}
+
+function getTeamsSnapshot(): Record<string, unknown>[] {
+  return Array.from(teams.values()).map((t) => ({
+    teamName: t.teamName,
+    description: t.description,
+    members: t.members,
+    workflow: t.workflow,
+  }));
+}
+
+function getTasksSnapshot(): Record<string, TaskInfo[]> {
+  const result: Record<string, TaskInfo[]> = {};
+  for (const [k, v] of tasks) result[k] = v;
+  return result;
+}
+
+// Initial scan
+scanTeams();
+scanTasks();
 
 // ── Browser-mock assets plugin ───────────────────────────────────────────────
 
@@ -191,8 +296,36 @@ function agentMonitorPlugin(): Plugin {
       });
 
       wss.on('connection', (ws) => {
-        ws.send(JSON.stringify({ type: 'init', sessions: getSessionsSnapshot() }));
+        // Re-scan teams and tasks on each new connection
+        scanTeams();
+        scanTasks();
+        // Match existing sessions to teams
+        for (const session of sessions.values()) matchSessionToTeam(session);
+        ws.send(JSON.stringify({
+          type: 'init',
+          sessions: getSessionsSnapshot(),
+          teams: getTeamsSnapshot(),
+          tasks: getTasksSnapshot(),
+        }));
       });
+
+      // Watch teams directory for changes
+      if (fs.existsSync(TEAMS_DIR)) {
+        fs.watch(TEAMS_DIR, { recursive: true }, () => {
+          scanTeams();
+          scanTasks();
+          for (const session of sessions.values()) matchSessionToTeam(session);
+          broadcast({ type: 'teams_update', teams: getTeamsSnapshot(), tasks: getTasksSnapshot() });
+        });
+      }
+
+      // Watch tasks directory for changes
+      if (fs.existsSync(TASKS_DIR)) {
+        fs.watch(TASKS_DIR, { recursive: true }, () => {
+          scanTasks();
+          broadcast({ type: 'tasks_update', tasks: getTasksSnapshot() });
+        });
+      }
 
       // Hook API endpoints
       server.middlewares.use('/api/session', async (req, res, next) => {
@@ -214,6 +347,7 @@ function agentMonitorPlugin(): Plugin {
               toolCount: 0,
             });
           }
+          matchSessionToTeam(sessions.get(sessionId)!);
           broadcast({ type: 'session_start', session: sessions.get(sessionId) });
           jsonResponse(res, { ok: true, id: sessionId });
         } else { next(); }
@@ -299,9 +433,23 @@ function agentMonitorPlugin(): Plugin {
         } else { next(); }
       });
 
+      server.middlewares.use('/api/teams', (req, res, next) => {
+        if (req.method === 'GET') {
+          scanTeams();
+          jsonResponse(res, getTeamsSnapshot());
+        } else { next(); }
+      });
+
+      server.middlewares.use('/api/tasks', (req, res, next) => {
+        if (req.method === 'GET') {
+          scanTasks();
+          jsonResponse(res, getTasksSnapshot());
+        } else { next(); }
+      });
+
       server.middlewares.use('/api/health', (req, res, next) => {
         if (req.method === 'GET') {
-          jsonResponse(res, { status: 'ok', sessions: sessions.size });
+          jsonResponse(res, { status: 'ok', sessions: sessions.size, teams: teams.size });
         } else { next(); }
       });
 
