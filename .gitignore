@@ -4,3 +4,4 @@ dist/
 .server.log
 .env
 *.tsbuildinfo
+.opened_today
