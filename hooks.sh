@@ -36,6 +36,9 @@ case "$event_type" in
     TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
     send "/api/tool/end" "{\"sessionId\":\"$SESSION_ID\",\"tool\":\"$TOOL_NAME\"}"
     ;;
+  waiting)
+    send "/api/waiting" "{\"sessionId\":\"$SESSION_ID\"}"
+    ;;
   agent_done)
     send "/api/session/done" "{\"sessionId\":\"$SESSION_ID\"}"
     ;;

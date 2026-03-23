@@ -622,6 +622,14 @@ export class OfficeState {
     }
   }
 
+  clearAnyBubble(id: number): void {
+    const ch = this.characters.get(id);
+    if (ch && ch.bubbleType) {
+      ch.bubbleType = null;
+      ch.bubbleTimer = 0;
+    }
+  }
+
   showWaitingBubble(id: number): void {
     const ch = this.characters.get(id);
     if (ch) {

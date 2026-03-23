@@ -207,7 +207,7 @@ export function useExtensionMessages(
         const toolName = extractToolName(status);
         os.setAgentTool(id, toolName);
         os.setAgentActive(id, true);
-        os.clearPermissionBubble(id);
+        os.clearAnyBubble(id);
         // Create sub-agent character for Task tool subtasks
         if (status.startsWith('Subtask:')) {
           const label = status.slice('Subtask:'.length).trim();
